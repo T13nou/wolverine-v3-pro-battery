@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <!-- Off by default: the controller keeps its own setting unless the user asks. -->
+    <entry name="setSleep" type="Bool">
+      <default>false</default>
+    </entry>
+    <!-- One of the Razer Synapse choices: 5, 15, 30, 45 or 60. -->
+    <entry name="sleepMinutes" type="Int">
+      <default>15</default>
+    </entry>
+  </group>
+</kcfg>

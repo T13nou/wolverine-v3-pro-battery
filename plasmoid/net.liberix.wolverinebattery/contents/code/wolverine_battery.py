@@ -8,8 +8,10 @@ usage page 0xff00). This script sends openrazer-style queries to it through hidr
 (HIDIOCSFEATURE then HIDIOCGFEATURE), the way HeadsetControl talks to a headset:
 xpad stays bound and the controller is never disconnected.
 
-Only the battery (0x07/0x80), charging (0x07/0x84) and firmware (0x00/0x81) reads
-are allowed: any other command is refused before it reaches the device.
+Only the battery (0x07/0x80), charging (0x07/0x84), firmware (0x00/0x81) and sleep
+timer (0x07/0x83) reads are allowed, plus a single write: the sleep timer (0x07/0x03),
+limited to the values Razer Synapse offers (5, 15, 30, 45 or 60 minutes). Any other
+command is refused before it reaches the device.
 
 Every query travels over the air to the controller and counts as activity, which
 keeps it from going to sleep. With --when-active, the script first listens to the
@@ -33,10 +35,20 @@ REPORT_SIZE = 90
 SIGNATURE = bytes.fromhex("0600ff8504")
 
 # Safety net: (class, command) -> label. Nothing else is ever sent to the controller.
+# Reads carry no data; the only write is listed in ALLOWED_WRITES.
 ALLOWED_READS = {
     (0x07, 0x80): "battery",
     (0x07, 0x84): "charging",
     (0x00, 0x81): "firmware",
+    (0x07, 0x83): "sleep",
+}
+
+# Sleep timer choices offered by Razer Synapse, in minutes.
+SLEEP_MINUTES = (5, 15, 30, 45, 60)
+
+# (class, command) -> (label, allowed values). The sleep timer is in seconds, little-endian.
+ALLOWED_WRITES = {
+    (0x07, 0x03): ("sleep", {minutes * 60 for minutes in SLEEP_MINUTES}),
 }
 
 STATUSES = {
@@ -58,14 +70,21 @@ HIDIOCSFEATURE = ioctl_feature(0x06, REPORT_SIZE + 1)
 HIDIOCGFEATURE = ioctl_feature(0x07, REPORT_SIZE + 1)
 
 
-def build_report(class_, command, transaction, size):
-    if (class_, command) not in ALLOWED_READS:
+def build_report(class_, command, transaction, size, data=b""):
+    if data:
+        if (class_, command) not in ALLOWED_WRITES:
+            raise ValueError(f"write refused: class 0x{class_:02x}, id 0x{command:02x}")
+        _, allowed = ALLOWED_WRITES[(class_, command)]
+        if int.from_bytes(data, "little") not in allowed:
+            raise ValueError(f"value not allowed: {int.from_bytes(data, 'little')}")
+    elif (class_, command) not in ALLOWED_READS:
         raise ValueError(f"command refused: class 0x{class_:02x}, id 0x{command:02x}")
     report = bytearray(REPORT_SIZE)
     report[1] = transaction
     report[5] = size
     report[6] = class_
     report[7] = command
+    report[8:8 + len(data)] = data
     crc = 0
     for byte in report[2:88]:
         crc ^= byte
@@ -194,8 +213,8 @@ def hexdump(data, length=12):
     return " ".join(f"{b:02x}" for b in data[:length]) + " …"
 
 
-def query(fd, class_, command, transaction, size, verbose, pause):
-    report = build_report(class_, command, transaction, size)
+def query(fd, class_, command, transaction, size, verbose, pause, data=b""):
+    report = build_report(class_, command, transaction, size, data)
     if verbose:
         print(f"  → {hexdump(report)}")
     fcntl.ioctl(fd, HIDIOCSFEATURE, bytes([REPORT_ID]) + report)
@@ -213,6 +232,14 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="print the reports without opening hidraw")
     parser.add_argument("-v", "--verbose", action="store_true", help="print the raw exchanges")
     parser.add_argument("--firmware", action="store_true", help="also read the firmware version")
+    parser.add_argument("--sleep", action="store_true", help="also read the sleep timer")
+    parser.add_argument(
+        "--set-sleep",
+        type=int,
+        choices=SLEEP_MINUTES,
+        metavar="MINUTES",
+        help="WRITE the sleep timer: 5, 15, 30, 45 or 60 minutes (the Synapse choices), then read it back",
+    )
     parser.add_argument(
         "--transaction",
         type=lambda v: int(v, 0),
@@ -228,16 +255,23 @@ def main():
         help="listen to the gamepad for SECONDS and only query it if it was used (lets it sleep)",
     )
     args = parser.parse_args()
+    set_sleep = args.set_sleep * 60 if args.set_sleep is not None else None
 
-    # (class, command, announced data size), sizes taken from openrazer.
-    reads = [(0x07, 0x80, 2), (0x07, 0x84, 2)]
+    # (class, command, announced data size, data), sizes taken from openrazer.
+    exchanges = []
+    if set_sleep is not None:
+        exchanges.append((0x07, 0x03, 2, set_sleep.to_bytes(2, "little")))
+    exchanges += [(0x07, 0x80, 2, b""), (0x07, 0x84, 2, b"")]
     if args.firmware:
-        reads.append((0x00, 0x81, 2))
+        exchanges.append((0x00, 0x81, 2, b""))
+    if args.sleep or set_sleep is not None:
+        exchanges.append((0x07, 0x83, 2, b""))
 
     if args.dry_run:
-        for class_, command, size in reads:
-            report = build_report(class_, command, args.transaction, size)
-            print(f"{ALLOWED_READS[(class_, command)]}: {report.hex(' ')}")
+        for class_, command, size, data in exchanges:
+            report = build_report(class_, command, args.transaction, size, data)
+            label = "set sleep" if data else ALLOWED_READS[(class_, command)]
+            print(f"{label}: {report.hex(' ')}")
         return 0
 
     if args.when_active is not None:
@@ -261,6 +295,7 @@ def main():
         print(f"{mode}: {path}")
 
     results = {}
+    written = None
     try:
         fd = os.open(path, os.O_RDWR)
     except PermissionError:
@@ -275,14 +310,16 @@ def main():
         print(f"Cannot open {path} ({error}).", file=sys.stderr)
         return 1
     try:
-        for class_, command, size in reads:
-            label = ALLOWED_READS[(class_, command)]
+        for class_, command, size, data in exchanges:
+            label = "set sleep" if data else ALLOWED_READS[(class_, command)]
             if args.verbose:
-                print(f"Reading {label} (0x{class_:02x}/0x{command:02x}):")
+                print(f"{'Writing' if data else 'Reading'} {label} (0x{class_:02x}/0x{command:02x}):")
             try:
-                response = query(fd, class_, command, args.transaction, size, args.verbose, args.pause)
+                response = query(fd, class_, command, args.transaction, size, args.verbose, args.pause, data)
             except OSError as error:
                 print(f"{label}: hidraw error ({error}).", file=sys.stderr)
+                if data:
+                    written = False
                 continue
             status = response[0]
             if status != 0x02 or response[6:8] != bytes([class_, command]):
@@ -291,10 +328,21 @@ def main():
                     "Try -v and another --transaction value.",
                     file=sys.stderr,
                 )
+                if data:
+                    written = False
+                continue
+            if data:
+                written = True
                 continue
             results[label] = response[8:8 + max(response[5], 1)]
     finally:
         os.close(fd)
+
+    sleep = int.from_bytes(results["sleep"][:2], "little") if "sleep" in results else None
+    if set_sleep is not None and written and sleep != set_sleep:
+        # Accepted but stored differently: report it rather than claim success.
+        written = False
+    success = "battery" in results and written is not False
 
     if args.json:
         output = {}
@@ -306,8 +354,12 @@ def main():
             output["charging"] = bool(results["charging"][-1])
         if "firmware" in results:
             output["firmware"] = f"{results['firmware'][0]}.{results['firmware'][1]:02d}"
+        if sleep is not None:
+            output["sleep"] = sleep
+        if written is not None:
+            output["sleep_set"] = written
         print(json.dumps(output))
-        return 0 if "battery" in results else 1
+        return 0 if success else 1
 
     if "battery" in results:
         raw = results["battery"][-1]
@@ -318,7 +370,11 @@ def main():
     if "firmware" in results:
         version = results["firmware"]
         print(f"Firmware: {version[0]}.{version[1]:02d} (raw bytes {version.hex(' ')})")
-    return 0 if "battery" in results else 1
+    if sleep is not None:
+        print(f"Sleep timer: {sleep} s ({sleep / 60:g} min)")
+    if written is False:
+        print(f"Setting the sleep timer to {args.set_sleep} min failed.", file=sys.stderr)
+    return 0 if success else 1
 
 
 if __name__ == "__main__":

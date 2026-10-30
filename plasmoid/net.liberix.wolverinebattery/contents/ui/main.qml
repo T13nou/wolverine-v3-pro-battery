@@ -4,7 +4,8 @@
  * Razer Wolverine V3 Pro battery in the KDE system tray.
  * Runs the bundled wolverine_battery.py and shows the level as a gauge. The script is run in
  * a loop with --when-active, so the controller is only queried when it was used in the last
- * minute and can go to sleep when left alone.
+ * minute and can go to sleep when left alone. Optionally sets the controller's sleep timer
+ * (configuration page), and sets it again if the controller reports another value.
  */
 import QtQuick
 import org.kde.kirigami as Kirigami
@@ -18,7 +19,7 @@ PlasmoidItem {
 
     // The script ships inside the package, next to this file.
     readonly property string script: decodeURIComponent(Qt.resolvedUrl("../code/wolverine_battery.py").toString().replace("file://", ""))
-    readonly property string command: "python3 '" + script + "' --json"
+    readonly property string command: "python3 '" + script + "' --json --sleep"
     readonly property string watchCommand: command + " --when-active 60"
     readonly property string firmwareCommand: command + " --firmware"
     readonly property int lowThreshold: 20
@@ -26,6 +27,9 @@ PlasmoidItem {
     property var reading: ({})
     property string firmware: ""
     property date readAt
+    property int sleepSeconds: 0
+    // Sleep timer asked for in the configuration, in minutes; 0 leaves the controller's own.
+    readonly property int wantedSleep: Plasmoid.configuration.setSleep ? Plasmoid.configuration.sleepMinutes : 0
     readonly property bool available: reading.battery !== undefined
     readonly property bool low: available && reading.battery <= lowThreshold && !reading.charging
 
@@ -34,6 +38,8 @@ PlasmoidItem {
         if (available) {
             let lines = [reading.charging ? "Charging" : "On battery",
                          "Read at " + Qt.formatTime(readAt, Qt.locale().timeFormat(Locale.ShortFormat))]
+            if (sleepSeconds)
+                lines.push("Sleeps after " + Math.round(sleepSeconds / 60) + " min idle")
             if (firmware)
                 lines.push("Firmware " + firmware)
             return lines.join("\n")
@@ -70,16 +76,35 @@ PlasmoidItem {
             } catch (e) {
                 result = { error: "unreadable" }
             }
-            // Idle controller: it was not queried, keep the last reading.
-            if (!result.idle) {
+            let settingSleep = source.indexOf("--set-sleep") >= 0
+            // Idle controller: it was not queried, keep the last reading. A failed sleep timer
+            // write (controller asleep) does not replace it either.
+            if (!result.idle && !(settingSleep && result.battery === undefined)) {
                 root.reading = result
                 root.readAt = new Date()
                 if (result.firmware)
                     root.firmware = result.firmware
+                if (result.sleep !== undefined)
+                    root.sleepSeconds = result.sleep
+                // Reapply the configured timer if the controller lost it; a failed write is
+                // retried at the next reading, not right away.
+                if (!settingSleep && result.sleep !== undefined)
+                    root.applySleep()
             }
             if (source === root.watchCommand)
                 restart.start()
         }
+    }
+
+    function applySleep() {
+        if (wantedSleep && wantedSleep * 60 !== sleepSeconds)
+            executable.connectSource(command + " --set-sleep " + wantedSleep)
+    }
+
+    Connections {
+        target: Plasmoid.configuration
+        function onSetSleepChanged() { root.applySleep() }
+        function onSleepMinutesChanged() { root.applySleep() }
     }
 
     // Next listening window. The short delay avoids a tight loop if the script fails at once.

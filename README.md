@@ -12,6 +12,8 @@ no driver to unbind, no disconnection while you play.
 - A udev rule, so it runs without root.
 - A Plasma 6 widget: a gamepad icon in the system tray that fills up with the battery level,
   turns green while charging and red below 20 %. The exact percentage is in the tooltip.
+- Set the controller's sleep timer (5, 15, 30, 45 or 60 minutes, as in Razer Synapse), from the
+  command line or the widget.
 
 ## Requirements
 
@@ -103,6 +105,25 @@ You can also add it directly to a panel. It reads the battery once at startup, t
 while the controller is in use (`--when-active`), so an idle controller still goes to sleep. The
 tooltip shows the time of the last reading; click the icon to read it now.
 
+### Sleep timer
+
+The controller goes to sleep after 15 minutes idle by default. To change it, pick one of the
+values Razer Synapse offers, in minutes:
+
+```sh
+./wolverine_battery.py --set-sleep 30    # 5, 15, 30, 45 or 60
+./wolverine_battery.py --sleep           # read the current value
+```
+
+The script reads the value back and fails if the controller stored something else. It refuses
+any other value: the firmware raises anything below 5 minutes to 5 minutes, and values outside
+the Synapse list are not needed.
+
+In the widget: right-click → *Configure…* → *Set the controller's sleep timer*. The widget writes
+it the next time the controller is in use, and again whenever the controller reports another
+value. Unchecking the option leaves the controller at its last value: pick 15 minutes first to
+go back to the default.
+
 The widget ships its own copy of the script, so the cloned repository is not needed once it is
 installed. It still needs the udev rule.
 
@@ -129,10 +150,16 @@ The tool sends the query with `HIDIOCSFEATURE` and reads the answer with `HIDIOC
 | `0x07/0x80` | battery level, last data byte, 0..255          |
 | `0x07/0x84` | charging, last data byte, 1 or 0               |
 | `0x00/0x81` | firmware version, major and minor (`02 04`)    |
+| `0x07/0x83` | sleep timer, seconds, little-endian (`84 03` = 900) |
+| `0x07/0x03` | **write** the sleep timer, same encoding       |
 
-**Only these three read commands can be sent**: the script refuses anything else before it
-reaches the device. Some vendor commands are write commands (one of them is a reset/power-off
-path in the firmware), so please keep this safety net if you experiment.
+**Only these four reads and this one write can be sent**, and the write only with one of the
+Synapse values: the script refuses anything else before it reaches the device. Other vendor
+commands change the controller's state (one of them is a reset/power-off path in the firmware),
+so please keep this safety net if you experiment.
+
+The sleep timer commands are the ones openrazer uses for wireless mice, with the bytes in the
+opposite order.
 
 In Xbox mode the controller speaks the GIP protocol instead. The same commands travel inside GIP
 vendor messages (`0x0f`/`0x10`) on the interrupt endpoints, which the kernel's xpad driver owns.
