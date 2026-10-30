@@ -85,6 +85,10 @@ queries anyway.
 
 ### Plasma widget
 
+Either download `wolverine-v3-pro-battery-<version>.plasmoid` from the
+[releases](https://github.com/T13nou/wolverine-v3-pro-battery/releases) and install it with
+*Add Widgets… → Get New Widgets → Install Widget From Local File…*, or from the cloned repository:
+
 ```sh
 kpackagetool6 -t Plasma/Applet -i plasmoid/net.liberix.wolverinebattery   # install
 kpackagetool6 -t Plasma/Applet -u plasmoid/net.liberix.wolverinebattery   # update
