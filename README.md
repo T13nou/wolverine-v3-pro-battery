@@ -17,11 +17,27 @@ no driver to unbind, no disconnection while you play.
 
 - The controller in **PC mode** (USB ID `1532:0a4c`). Check with `lsusb | grep 1532`.
   Xbox mode (`1532:0a3f`) is not supported: it has no HID interface (see below).
-- Python 3.
+- Python 3.8 or later (standard library only).
+- For the udev rule without root: a distribution with systemd-logind or elogind (`uaccess` tag).
 - For the widget: KDE Plasma 6.
 
-Tested with controller firmware 2.04.00 (updated with Razer's Windows app), through the 2.4 GHz
-dongle. A USB cable in PC mode should work the same way but has not been tested yet: reports welcome.
+Nothing here is tied to one distribution: it only uses the kernel's `hidraw` driver (enabled in
+every mainstream kernel), udev and Python. It should work on any recent Linux distribution
+(Arch, Fedora, openSUSE, Debian, Ubuntu…); the widget needs a distribution that ships Plasma 6.
+
+Tested setup:
+
+| Component  | Version                                                       |
+|------------|---------------------------------------------------------------|
+| Distro     | CachyOS (Arch-based)                                          |
+| Kernel     | 7.3                                                           |
+| Desktop    | KDE Plasma 6                                                  |
+| Python     | 3.14                                                          |
+| Controller | firmware 2.04.00 (updated with Razer's Windows app), PC mode, 2.4 GHz dongle |
+
+A USB cable in PC mode should work the same way but has not been tested yet. Reports from other
+distributions and setups are welcome: please open an issue with your distro, kernel and the output
+of `./wolverine_battery.py -v --firmware`.
 
 ## Installation
 
