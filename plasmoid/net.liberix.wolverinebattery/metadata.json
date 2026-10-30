@@ -1,0 +1,22 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Etienne Blanchet"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Battery level of the Razer Wolverine V3 Pro controller (PC mode)",
+        "EnabledByDefault": true,
+        "Icon": "input-gamepad",
+        "Id": "net.liberix.wolverinebattery",
+        "License": "GPL-2.0-or-later",
+        "Name": "Wolverine V3 Pro Battery",
+        "Version": "1.0",
+        "Website": "https://github.com/T13nou/wolverine-v3-pro-battery"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-NotificationArea": "true",
+    "X-Plasma-NotificationAreaCategory": "Hardware"
+}

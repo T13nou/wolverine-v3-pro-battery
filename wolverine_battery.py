@@ -1,0 +1,1 @@
+plasmoid/net.liberix.wolverinebattery/contents/code/wolverine_battery.py

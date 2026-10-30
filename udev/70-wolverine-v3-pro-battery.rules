@@ -1,0 +1,4 @@
+# Razer Wolverine V3 Pro in PC mode (1532:0a4c): give the logged-in user access to its
+# hidraw node, so the battery can be read without root. Only the battery, charging and
+# firmware reads are ever sent (see wolverine_battery.py).
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0a4c", TAG+="uaccess"
