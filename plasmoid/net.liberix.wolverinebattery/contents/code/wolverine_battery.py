@@ -98,7 +98,7 @@ def eviocgabs(code):
     return (2 << 30) | (24 << 16) | (ord("E") << 8) | (0x40 + code)
 
 
-def find_gamepad_inputs():
+def find_gamepad_inputs(verbose=False):
     """Event nodes of the gamepad (axes declared), readable thanks to systemd's uaccess rule."""
     nodes = []
     for entry in sorted(Path("/sys/class/input").glob("event*")):
@@ -109,12 +109,15 @@ def find_gamepad_inputs():
             axes = (device / "capabilities" / "abs").read_text().strip()
         except OSError:
             continue
+        if verbose and vid == VID:
+            name = (device / "name").read_text().strip()
+            print(f"{entry.name}: {vid}:{pid} '{name}' abs={axes}")
         if vid == VID and pid in PIDS and axes != "0":
             nodes.append(Path("/dev/input") / entry.name)
     return nodes
 
 
-def wait_for_activity(nodes, seconds):
+def wait_for_activity(nodes, seconds, verbose=False):
     """True if a button is pressed or an axis moves by 1/8 of its range within `seconds`.
 
     Always takes the full `seconds` when the controller is used.
@@ -125,8 +128,11 @@ def wait_for_activity(nodes, seconds):
     for node in nodes:
         try:
             fds.append(os.open(node, os.O_RDONLY | os.O_NONBLOCK))
-        except OSError:
-            pass
+            if verbose:
+                print(f"listening to {node}")
+        except OSError as error:
+            if verbose:
+                print(f"cannot open {node} ({error})")
     if not fds:
         return None
     axes = {}  # (fd, code) -> (last value, threshold)
@@ -161,6 +167,8 @@ def wait_for_activity(nodes, seconds):
                     continue
                 for offset in range(0, len(data) - INPUT_EVENT.size + 1, INPUT_EVENT.size):
                     _, _, type_, code, value = INPUT_EVENT.unpack_from(data, offset)
+                    if verbose and type_:
+                        print(f"  event type {type_} code {code} value {value}")
                     if type_ == EV_KEY or (type_ == EV_ABS and moved(fd, code, value)):
                         # Keep the full window, so a controller in use is queried once per window.
                         time.sleep(max(0, end - time.monotonic()))
@@ -222,7 +230,7 @@ def main():
         return 0
 
     if args.when_active is not None:
-        active = wait_for_activity(find_gamepad_inputs(), args.when_active)
+        active = wait_for_activity(find_gamepad_inputs(args.verbose), args.when_active, args.verbose)
         if active is False:
             if args.json:
                 print(json.dumps({"idle": True}))
