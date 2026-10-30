@@ -91,6 +91,14 @@ def find_hidraw():
 # struct input_event: struct timeval, __u16 type, __u16 code, __s32 value.
 INPUT_EVENT = struct.Struct("llHHi")
 EV_KEY, EV_ABS = 0x01, 0x03
+BTN_GAMEPAD = 0x130
+
+
+def has_bit(bitmap, bit):
+    """Test a bit in a sysfs capability bitmap (hex words, most significant first)."""
+    words = bitmap.split()
+    index = len(words) - 1 - bit // 64
+    return index >= 0 and bool(int(words[index], 16) >> (bit % 64) & 1)
 
 
 def eviocgabs(code):
@@ -99,20 +107,23 @@ def eviocgabs(code):
 
 
 def find_gamepad_inputs(verbose=False):
-    """Event nodes of the gamepad (axes declared), readable thanks to systemd's uaccess rule."""
+    """Event nodes of the gamepad (gamepad buttons declared), readable thanks to systemd's uaccess rule.
+
+    The HID interface of the dongle also has keyboard, mouse and vendor nodes: they are skipped.
+    """
     nodes = []
     for entry in sorted(Path("/sys/class/input").glob("event*")):
         device = entry / "device"
         try:
             vid = (device / "id" / "vendor").read_text().strip()
             pid = (device / "id" / "product").read_text().strip()
-            axes = (device / "capabilities" / "abs").read_text().strip()
+            keys = (device / "capabilities" / "key").read_text().strip()
         except OSError:
             continue
         if verbose and vid == VID:
             name = (device / "name").read_text().strip()
-            print(f"{entry.name}: {vid}:{pid} '{name}' abs={axes}")
-        if vid == VID and pid in PIDS and axes != "0":
+            print(f"{entry.name}: {vid}:{pid} '{name}' gamepad={has_bit(keys, BTN_GAMEPAD)}")
+        if vid == VID and pid in PIDS and has_bit(keys, BTN_GAMEPAD):
             nodes.append(Path("/dev/input") / entry.name)
     return nodes
 
