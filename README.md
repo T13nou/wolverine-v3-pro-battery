@@ -70,6 +70,19 @@ $ ./wolverine_battery.py --json
 
 `-v` prints the raw reports, `--dry-run` prints what would be sent without touching the device.
 
+Each query travels over the air to the controller, and the controller counts it as activity: polling
+it every minute keeps it from going to sleep. `--when-active SECONDS` first listens to the gamepad
+input for that long, and only queries the controller if a button was pressed or a stick moved:
+
+```console
+$ ./wolverine_battery.py --json --when-active 60
+{"idle": true}
+```
+
+Listening needs read access to the gamepad's input device, which systemd's own `uaccess` rule
+already grants to the logged-in user (games rely on it). If it is not readable, the script
+queries anyway.
+
 ### Plasma widget
 
 ```sh
@@ -82,7 +95,9 @@ systemctl --user restart plasma-plasmashell
 The system tray only discovers new widgets when Plasma restarts. The widget then shows up in
 the Hardware section, and hides itself in the tray popup while the controller is off or absent.
 To force it visible or hidden: right-click the tray arrow → *Configure System Tray…* → *Entries*.
-You can also add it directly to a panel. It reads the battery every minute; click it to refresh.
+You can also add it directly to a panel. It reads the battery once at startup, then once a minute
+while the controller is in use (`--when-active`), so an idle controller still goes to sleep. The
+tooltip shows the time of the last reading; click the icon to read it now.
 
 The widget ships its own copy of the script, so the cloned repository is not needed once it is
 installed. It still needs the udev rule.

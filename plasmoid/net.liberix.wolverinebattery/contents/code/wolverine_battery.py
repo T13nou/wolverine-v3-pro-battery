@@ -10,12 +10,18 @@ xpad stays bound and the controller is never disconnected.
 
 Only the battery (0x07/0x80), charging (0x07/0x84) and firmware (0x00/0x81) reads
 are allowed: any other command is refused before it reaches the device.
+
+Every query travels over the air to the controller and counts as activity, which
+keeps it from going to sleep. With --when-active, the script first listens to the
+gamepad input device and only queries the controller if it was used meanwhile.
 """
 
 import argparse
 import fcntl
 import json
 import os
+import select
+import struct
 import sys
 import time
 from pathlib import Path
@@ -82,6 +88,89 @@ def find_hidraw():
     return None, None
 
 
+# struct input_event: struct timeval, __u16 type, __u16 code, __s32 value.
+INPUT_EVENT = struct.Struct("llHHi")
+EV_KEY, EV_ABS = 0x01, 0x03
+
+
+def eviocgabs(code):
+    # _IOR('E', 0x40 + code, struct input_absinfo), six __s32.
+    return (2 << 30) | (24 << 16) | (ord("E") << 8) | (0x40 + code)
+
+
+def find_gamepad_inputs():
+    """Event nodes of the gamepad (axes declared), readable thanks to systemd's uaccess rule."""
+    nodes = []
+    for entry in sorted(Path("/sys/class/input").glob("event*")):
+        device = entry / "device"
+        try:
+            vid = (device / "id" / "vendor").read_text().strip()
+            pid = (device / "id" / "product").read_text().strip()
+            axes = (device / "capabilities" / "abs").read_text().strip()
+        except OSError:
+            continue
+        if vid == VID and pid in PIDS and axes != "0":
+            nodes.append(Path("/dev/input") / entry.name)
+    return nodes
+
+
+def wait_for_activity(nodes, seconds):
+    """True if a button is pressed or an axis moves by 1/8 of its range within `seconds`.
+
+    Always takes the full `seconds` when the controller is used.
+
+    None if no input node can be opened. Small stick jitter is not activity.
+    """
+    fds = []
+    for node in nodes:
+        try:
+            fds.append(os.open(node, os.O_RDONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+    if not fds:
+        return None
+    axes = {}  # (fd, code) -> (last value, threshold)
+
+    def moved(fd, code, value):
+        if (fd, code) not in axes:
+            info = bytearray(24)
+            try:
+                fcntl.ioctl(fd, eviocgabs(code), info)
+                current, minimum, maximum = struct.unpack_from("iii", info)
+            except OSError:
+                current, minimum, maximum = value, 0, 0
+            axes[fd, code] = (current, max(1, (maximum - minimum) // 8))
+        last, threshold = axes[fd, code]
+        return abs(value - last) >= threshold
+
+    try:
+        end = time.monotonic() + seconds
+        while (left := end - time.monotonic()) > 0:
+            ready, _, _ = select.select(fds, [], [], left)
+            for fd in ready:
+                try:
+                    data = os.read(fd, INPUT_EVENT.size * 64)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    # Node gone (dongle unplugged): stop listening to it.
+                    fds.remove(fd)
+                    os.close(fd)
+                    if not fds:
+                        return False
+                    continue
+                for offset in range(0, len(data) - INPUT_EVENT.size + 1, INPUT_EVENT.size):
+                    _, _, type_, code, value = INPUT_EVENT.unpack_from(data, offset)
+                    if type_ == EV_KEY or (type_ == EV_ABS and moved(fd, code, value)):
+                        # Keep the full window, so a controller in use is queried once per window.
+                        time.sleep(max(0, end - time.monotonic()))
+                        return True
+        return False
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
 def hexdump(data, length=12):
     return " ".join(f"{b:02x}" for b in data[:length]) + " …"
 
@@ -113,6 +202,12 @@ def main():
     )
     parser.add_argument("--json", action="store_true", help="one-line JSON output (used by the Plasma widget)")
     parser.add_argument("--pause", type=float, default=0.05, help="delay between write and read, in seconds")
+    parser.add_argument(
+        "--when-active",
+        type=float,
+        metavar="SECONDS",
+        help="listen to the gamepad for SECONDS and only query it if it was used (lets it sleep)",
+    )
     args = parser.parse_args()
 
     # (class, command, announced data size), sizes taken from openrazer.
@@ -125,6 +220,17 @@ def main():
             report = build_report(class_, command, args.transaction, size)
             print(f"{ALLOWED_READS[(class_, command)]}: {report.hex(' ')}")
         return 0
+
+    if args.when_active is not None:
+        active = wait_for_activity(find_gamepad_inputs(), args.when_active)
+        if active is False:
+            if args.json:
+                print(json.dumps({"idle": True}))
+            else:
+                print("Controller idle: not queried.")
+            return 0
+        if active is None:
+            print("Gamepad input not readable: querying anyway.", file=sys.stderr)
 
     path, mode = find_hidraw()
     if path is None:

@@ -2,7 +2,9 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * Razer Wolverine V3 Pro battery in the KDE system tray.
- * Runs the bundled wolverine_battery.py --json every minute and shows the level as a gauge.
+ * Runs the bundled wolverine_battery.py and shows the level as a gauge. The script is run in
+ * a loop with --when-active, so the controller is only queried when it was used in the last
+ * minute and can go to sleep when left alone.
  */
 import QtQuick
 import org.kde.kirigami as Kirigami
@@ -16,19 +18,24 @@ PlasmoidItem {
 
     // The script ships inside the package, next to this file.
     readonly property string script: decodeURIComponent(Qt.resolvedUrl("../code/wolverine_battery.py").toString().replace("file://", ""))
-    readonly property string command: "python3 '" + script + "' --json --firmware"
+    readonly property string command: "python3 '" + script + "' --json"
+    readonly property string watchCommand: command + " --when-active 60"
+    readonly property string firmwareCommand: command + " --firmware"
     readonly property int lowThreshold: 20
 
     property var reading: ({})
+    property string firmware: ""
+    property date readAt
     readonly property bool available: reading.battery !== undefined
     readonly property bool low: available && reading.battery <= lowThreshold && !reading.charging
 
     readonly property string percent: available ? reading.battery + " %" : "—"
     readonly property string detail: {
         if (available) {
-            let lines = [reading.charging ? "Charging" : "On battery"]
-            if (reading.firmware)
-                lines.push("Firmware " + reading.firmware)
+            let lines = [reading.charging ? "Charging" : "On battery",
+                         "Read at " + Qt.formatTime(readAt, Qt.locale().timeFormat(Locale.ShortFormat))]
+            if (firmware)
+                lines.push("Firmware " + firmware)
             return lines.join("\n")
         }
         switch (reading.error) {
@@ -57,20 +64,35 @@ PlasmoidItem {
         connectedSources: []
         onNewData: (source, data) => {
             disconnectSource(source)
+            let result
             try {
-                root.reading = JSON.parse((data["stdout"] || "").trim())
+                result = JSON.parse((data["stdout"] || "").trim())
             } catch (e) {
-                root.reading = { error: "unreadable" }
+                result = { error: "unreadable" }
             }
+            // Idle controller: it was not queried, keep the last reading.
+            if (!result.idle) {
+                root.reading = result
+                root.readAt = new Date()
+                if (result.firmware)
+                    root.firmware = result.firmware
+            }
+            if (source === root.watchCommand)
+                restart.start()
         }
     }
 
+    // Next listening window. The short delay avoids a tight loop if the script fails at once.
     Timer {
-        interval: 60 * 1000
-        running: true
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: executable.connectSource(root.command)
+        id: restart
+        interval: 2000
+        onTriggered: executable.connectSource(root.watchCommand)
+    }
+
+    Component.onCompleted: {
+        // One immediate reading (with the firmware), then listen in a loop.
+        executable.connectSource(root.firmwareCommand)
+        executable.connectSource(root.watchCommand)
     }
 
     // The gamepad is the gauge: its silhouette fills from left to right with the level,
