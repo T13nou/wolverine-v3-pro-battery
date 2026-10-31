@@ -91,6 +91,11 @@ PlasmoidItem {
                 if (!settingSleep && result.sleep !== undefined)
                     root.applySleep()
             }
+            // No reading yet because of an error raised before anything reached the controller
+            // (permission not granted yet at login, dongle absent): retry now rather than wait
+            // for the controller to be used. "Controller off" still waits for activity.
+            if (result.idle && !root.available && root.reading.error !== "no_response")
+                executable.connectSource(root.firmwareCommand)
             if (source === root.watchCommand)
                 restart.start()
         }

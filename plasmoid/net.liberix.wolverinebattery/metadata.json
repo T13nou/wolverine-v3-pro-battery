@@ -13,7 +13,7 @@
         "Id": "net.liberix.wolverinebattery",
         "License": "GPL-2.0-or-later",
         "Name": "Wolverine V3 Pro Battery",
-        "Version": "1.1",
+        "Version": "1.1.1",
         "Website": "https://github.com/T13nou/wolverine-v3-pro-battery"
     },
     "X-Plasma-API-Minimum-Version": "6.0",
