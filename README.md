@@ -43,12 +43,33 @@ of `./wolverine_battery.py -v --firmware`.
 
 ## Installation
 
+### Quick install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/T13nou/wolverine-v3-pro-battery/main/install.sh | bash
+```
+
+It downloads the latest release, installs the udev rule (asks for your password through `sudo`,
+the only step that needs it), installs the Plasma widget and a `wolverine-battery` command in
+`~/.local/bin`, then offers to restart Plasma. Run the same command again to **update**.
+
+To **uninstall** (widget, command and udev rule):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/T13nou/wolverine-v3-pro-battery/main/install.sh | bash -s -- uninstall
+```
+
+You can read [install.sh](install.sh) first, or download it and run `bash install.sh`,
+`bash install.sh uninstall`.
+
+### Manual installation
+
 ```sh
 git clone https://github.com/T13nou/wolverine-v3-pro-battery.git
 cd wolverine-v3-pro-battery
 ```
 
-### udev rule (read without root)
+#### udev rule (read without root)
 
 ```sh
 sudo install -m 644 udev/70-wolverine-v3-pro-battery.rules /etc/udev/rules.d/
@@ -59,7 +80,7 @@ sudo udevadm trigger --subsystem-match=hidraw
 The rule grants the logged-in user access to the controller's hidraw node only (`uaccess`).
 To remove it: delete the file and run the last two commands again.
 
-### Command line
+#### Command line
 
 ```console
 $ ./wolverine_battery.py --firmware
@@ -85,7 +106,7 @@ Listening needs read access to the gamepad's input device, which systemd's own `
 already grants to the logged-in user (games rely on it). If it is not readable, the script
 queries anyway.
 
-### Plasma widget
+#### Plasma widget
 
 Either download `wolverine-v3-pro-battery-<version>.plasmoid` from the
 [releases](https://github.com/T13nou/wolverine-v3-pro-battery/releases) and install it with
@@ -105,7 +126,7 @@ You can also add it directly to a panel. It reads the battery once at startup, t
 while the controller is in use (`--when-active`), so an idle controller still goes to sleep. The
 tooltip shows the time of the last reading; click the icon to read it now.
 
-### Sleep timer
+## Sleep timer
 
 The controller goes to sleep after 15 minutes idle by default. To change it, pick one of the
 values Razer Synapse offers, in minutes:
